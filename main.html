@@ -72,6 +72,7 @@
     let liveState = { set: 0, slide: 0, timer: null, isTransitioning: false };
     let globalSettings = { transitionVideoSrc: '', wipePoint: 0.5 };
     let mediaToggleIndex = 0;
+    let lastDataSnapshot = '';
 
     // --- DOM ELEMENT CACHE ---
     const DOMElements = {
@@ -84,7 +85,8 @@
     // --- INITIALIZATION ---
     function initialize() {
         createMediaElements();
-        loadStateFromStorage();
+        // **FIX**: Replaced the unreliable 'storage' event with a robust polling interval.
+        setInterval(checkForUpdates, 250); 
         updateTime();
         setInterval(updateTime, 1000);
     }
@@ -109,7 +111,7 @@
     
     function updateDisplay(setIndex, slideIndex, isInitialLoad = false) {
         const set = newsSets[setIndex];
-        if (!set || !set.slides[slideIndex]) return; // Safety check
+        if (!set || !set.slides[slideIndex]) return;
         const slide = set.slides[slideIndex];
         
         const updateActions = () => {
@@ -137,12 +139,12 @@
 
     // --- TRANSITION & AUTO-SLIDE LOGIC ---
     function transitionToSet(setIndex) {
-        if (liveState.isTransitioning || (liveState.set === setIndex && liveState.timer)) return;
+        if (liveState.isTransitioning) return;
         clearInterval(liveState.timer);
         liveState.isTransitioning = true;
-        liveState.set = setIndex; 
-
+        
         const performContentSwap = () => {
+            liveState.set = setIndex; 
             liveState.slide = 0;
             updateDisplay(liveState.set, liveState.slide, true);
             startAutoSlide();
@@ -180,12 +182,21 @@
     function applyGlobalStyles() { document.documentElement.style.setProperty('--layout-split', globalSettings.layoutSplit + '%'); }
     function updateTime() { document.getElementById('currentTime').textContent = new Date().toLocaleTimeString('en-US', { hour12: false }); }
 
+    function checkForUpdates() {
+        const currentData = localStorage.getItem('broadcastData');
+        if (currentData && currentData !== lastDataSnapshot) {
+            lastDataSnapshot = currentData;
+            loadStateFromStorage();
+        }
+    }
+    
     function loadStateFromStorage() {
         try {
-            const data = JSON.parse(localStorage.getItem('broadcastData'));
-            if (!data) throw new Error("No saved data");
+            const data = JSON.parse(lastDataSnapshot);
+            if (!data) return;
 
             const oldLiveSet = liveState.set;
+            const needsFullRefresh = !newsSets.length; // True only on first load
 
             newsSets = data.newsSets || [];
             globalSettings = data.globalSettings || {};
@@ -197,18 +208,20 @@
             DOMElements.headerBgVideo.src = globalSettings.headerBgSrc || '';
             DOMElements.tickerBgVideo.src = globalSettings.tickerBgSrc || '';
 
-            if (oldLiveSet !== liveState.set && !liveState.isTransitioning) {
+            if (needsFullRefresh) {
+                updateDisplay(liveState.set, liveState.slide, true);
+                startAutoSlide();
+            } else if (oldLiveSet !== liveState.set && !liveState.isTransitioning) {
                 transitionToSet(liveState.set);
-            } else if (!liveState.timer) {
-                 updateDisplay(liveState.set, liveState.slide, true);
-                 startAutoSlide();
+            } else {
+                // If only text/media changed in the current set, just update display
+                updateDisplay(liveState.set, liveState.slide);
             }
-        } catch(e) { console.error("Could not load state, using defaults.", e); }
+        } catch(e) { /* Fail silently, will retry on next poll */ }
     }
 
     // --- EVENT LISTENERS ---
     document.addEventListener('DOMContentLoaded', initialize);
-    window.addEventListener('storage', (e) => { if (e.key === 'broadcastData') loadStateFromStorage(); });
     DOMElements.transitionVideo.addEventListener('ended', () => { DOMElements.transitionVideo.style.display = 'none'; liveState.isTransitioning = false; });
     
     // --- PARTICLE BACKGROUND ---
