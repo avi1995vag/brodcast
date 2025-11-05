@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Broadcast Controls</title>
+    <link href="https://fonts.googleapis.com/css2?family=Anek+Kannada:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root { --primary-color: #0078D4; --dark-bg-2: #111827; --border-color: #005a9e; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Anek Kannada', sans-serif; background: var(--dark-bg-2); color: white; padding: 20px; }
+        .panel-container { display: flex; gap: 20px; }
+        .panel { background: rgba(26, 35, 51, 0.95); padding: 25px; border-radius: 15px; border: 1px solid var(--border-color); width: 420px; max-height: calc(100vh - 40px); overflow-y: auto; }
+        .panel h3 { margin-top:0; margin-bottom: 25px; font-size: 20px; text-transform: uppercase; border-bottom: 2px solid var(--primary-color); padding-bottom: 10px; }
+        fieldset { border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+        legend { color: var(--primary-color); font-weight: 700; padding: 0 10px; text-transform: uppercase; }
+        .control-group { margin-bottom: 15px; }
+        label { display: block; font-size: 13px; margin-bottom: 8px; font-weight: 600; }
+        input, select, textarea { width: 100%; padding: 10px; border-radius: 8px; border: 2px solid var(--border-color); background: rgba(0, 0, 0, 0.5); color: white; font-family: 'Anek Kannada', sans-serif;}
+        .save-buttons { display: flex; gap: 10px; }
+        .save-buttons button { flex: 1; padding: 10px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        #saveSettingsBtn { background-color: var(--primary-color); color: white; }
+        #clearSettingsBtn { background-color: #555; color: white; }
+        .rundown-list li { padding: 12px; border-radius: 8px; margin-bottom: 8px; background: rgba(0,0,0,0.3); cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s ease-in-out; }
+        .rundown-list li.active-edit { box-shadow: 0 0 0 2px var(--primary-color); }
+        .rundown-list li.active-live { background: #00c853; }
+        .go-live-btn { background: #00c853; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        #bulkTextEditor { min-height: 150px; resize: vertical; font-family: monospace; white-space: pre; }
+        .media-file-list, .media-note { font-size: 12px; color: #aaa; margin-top: 10px; }
+        .media-file-list p { margin: 4px 0; }
+    </style>
+</head>
+<body>
+    <div class="panel-container">
+        <div class="panel" id="rundownPanel">
+            <h3>📰 Rundown Sets</h3>
+            <fieldset><legend>Set List & Settings</legend>
+                <ul class="rundown-list" id="rundownListUI"></ul>
+                <div class="control-group"><label>Auto-Slide Duration (seconds)</label><input type="number" id="slideDuration" value="8" min="2"></div>
+            </fieldset>
+            <fieldset id="setDataEditor">
+                <legend>Edit Set <span id="currentSetId">1</span></legend>
+                <div class="control-group"><label>Bulk Text (Title, Subtitle, Ticker Line)</label><textarea id="bulkTextEditor" placeholder="Header Title&#10;Header Subtitle&#10;Ticker Line&#10;---&#10;Next Slide..."></textarea></div>
+                <div class="control-group"><label>Slide Media (Select up to 5 files)</label><input type="file" id="mediaUpload" multiple accept="image/*,video/*">
+                    <div class="media-file-list" id="mediaFileList"></div>
+                </div>
+            </fieldset>
+        </div>
+
+        <div class="panel" id="controlsPanel">
+            <h3>🎨 Styles & Branding</h3>
+            <fieldset><legend>Layout & Theme</legend>
+                <div class="control-group"><label>Anchor Panel Width</label><input type="range" id="layoutSplit" value="30" min="20" max="50"></div>
+                <div class="control-group"><label>Color Theme</label><select id="themeSelector"><option value="blue">Professional Blue</option><option value="red">Breaking News Red</option><option value="tech">Modern Tech</option><option value="light">Clean & Light</option></select></div>
+            </fieldset>
+            <fieldset><legend>Global Backgrounds</legend>
+                 <div class="control-group"><label>Header Background Media (Universal)</label><input type="file" id="headerBgUpload" accept="image/*,video/*"></div>
+                 <div class="control-group"><label>Ticker Background Media (Universal)</label><input type="file" id="tickerBgUpload" accept="image/*,video/*"></div>
+            </fieldset>
+            <fieldset><legend>Transitions</legend>
+                <div class="control-group"><label>Custom Wipe/Stinger Video</label><input type="file" id="transitionVideoUpload" accept="video/*"></div>
+                <div class="control-group"><label>Wipe Point (seconds)</label><input type="number" id="wipePoint" value="0.5" step="0.1" min="0"></div>
+            </fieldset>
+            <fieldset><legend>Session Data</legend>
+                <div class="save-buttons">
+                    <button id="saveSettingsBtn">Save Settings</button>
+                    <button id="clearSettingsBtn">Clear & Reset</button>
+                </div>
+                <p class="media-note">Note: Media files must be re-uploaded each session.</p>
+            </fieldset>
+        </div>
+    </div>
+
+    <script>
+    // --- STATE & GLOBAL VARS ---
+    let newsSets = [];
+    let globalSettings = {};
+    let activeEditorSet = 0;
+    let liveState = { set: 0 };
+
+    // --- DOM ELEMENT CACHE ---
+    const DOMElements = {
+        rundownListUI: document.getElementById('rundownListUI'), currentSetId: document.getElementById('currentSetId'),
+        bulkTextEditor: document.getElementById('bulkTextEditor'), mediaUpload: document.getElementById('mediaUpload'),
+        mediaFileList: document.getElementById('mediaFileList'), slideDurationInput: document.getElementById('slideDuration'),
+        layoutSplitInput: document.getElementById('layoutSplit'), themeSelector: document.getElementById('themeSelector'),
+        wipePointInput: document.getElementById('wipePoint'), headerBgUpload: document.getElementById('headerBgUpload'),
+        tickerBgUpload: document.getElementById('tickerBgUpload'), transitionVideoUpload: document.getElementById('transitionVideoUpload'),
+    };
+    
+    // --- INITIALIZATION ---
+    function initialize() {
+        loadStateFromStorage();
+        renderRundownList();
+        loadSetIntoEditor(activeEditorSet);
+    }
+
+    // --- RUNDOWN & EDITOR LOGIC ---
+    function renderRundownList() {
+        DOMElements.rundownListUI.innerHTML = newsSets.map((set, index) => {
+            let classes = [];
+            if (index === activeEditorSet) classes.push('active-edit');
+            if (index === liveState.set) classes.push('active-live');
+            return `<li class="${classes.join(' ')}" data-set-index="${index}">
+                <span>Set ${index + 1}</span> <button class="go-live-btn">GO LIVE</button>
+            </li>`;
+        }).join('');
+    }
+
+    function loadSetIntoEditor(setIndex) {
+        activeEditorSet = setIndex;
+        DOMElements.currentSetId.textContent = setIndex + 1;
+        const bulkText = newsSets[setIndex].slides.map(s => `${s.headerTitle}\n${s.headerSubtitle}\n${s.tickerLine}`).join('\n---\n');
+        DOMElements.bulkTextEditor.value = bulkText;
+        DOMElements.mediaUpload.value = '';
+        renderMediaFileList();
+        renderRundownList();
+    }
+
+    function renderMediaFileList() {
+        DOMElements.mediaFileList.innerHTML = newsSets[activeEditorSet].slides.map((slide, i) =>
+            `<p><b>Slide ${i+1}:</b> ${slide.mediaName || 'No file selected'}</p>`).join('');
+    }
+    
+    function parseAndSaveChanges() {
+        const slideBlocks = DOMElements.bulkTextEditor.value.split(/\n---\n/);
+        newsSets[activeEditorSet].slides.forEach((slide, i) => {
+            const lines = slideBlocks[i] ? slideBlocks[i].split('\n') : [];
+            slide.headerTitle = lines[0] || '';
+            slide.headerSubtitle = lines[1] || '';
+            slide.tickerLine = lines[2] || '';
+        });
+        saveStateToStorage();
+    }
+
+    const fileToDataURL = file => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+
+    async function handleMediaUpload(event) {
+        const files = event.target.files;
+        for (let i = 0; i < Math.min(files.length, 5); i++) {
+            const slide = newsSets[activeEditorSet].slides[i];
+            slide.mediaSrc = await fileToDataURL(files[i]);
+            slide.mediaName = files[i].name;
+        }
+        renderMediaFileList();
+        saveStateToStorage();
+    }
+    
+    async function handleGlobalMediaUpload(event, key) {
+        const file = event.target.files[0];
+        if (file) {
+            globalSettings[key] = await fileToDataURL(file);
+            saveStateToStorage();
+        }
+    }
+
+    // --- STATE & SAVE/LOAD LOGIC ---
+    function saveStateToStorage(isManualSave = false) {
+        globalSettings.theme = DOMElements.themeSelector.value;
+        globalSettings.layoutSplit = DOMElements.layoutSplitInput.value;
+        globalSettings.slideDuration = DOMElements.slideDurationInput.value;
+        globalSettings.wipePoint = DOMElements.wipePointInput.value;
+
+        const dataToSave = { newsSets, globalSettings, liveState };
+        localStorage.setItem('broadcastData', JSON.stringify(dataToSave));
+        if (isManualSave) alert('Settings saved!');
+    }
+
+    function loadStateFromStorage() {
+        try {
+            const data = JSON.parse(localStorage.getItem('broadcastData'));
+            if (data) {
+                newsSets = data.newsSets || [];
+                globalSettings = data.globalSettings || {};
+                liveState = data.liveState || { set: 0 };
+                DOMElements.themeSelector.value = globalSettings.theme || 'blue';
+                DOMElements.layoutSplitInput.value = globalSettings.layoutSplit || '30';
+                DOMElements.slideDurationInput.value = globalSettings.slideDuration || '8';
+                DOMElements.wipePointInput.value = globalSettings.wipePoint || '0.5';
+
+            } else { throw new Error("No saved data"); }
+        } catch (e) {
+            for (let i = 0; i < 10; i++) {
+                const slides = Array.from({ length: 5 }, (_, j) => ({
+                    headerTitle: `Title ${j+1}`, headerSubtitle: `Subtitle for Story ${i+1}`,
+                    tickerLine: `This is the ticker for slide ${j+1} of set ${i+1}.`,
+                    mediaSrc: ``, mediaName: `No file selected`
+                }));
+                newsSets.push({ slides });
+            }
+        }
+    }
+    
+    function clearAndReset() {
+        if (confirm('Are you sure you want to clear all saved settings and reset?')) {
+            localStorage.removeItem('broadcastData');
+            window.location.reload();
+        }
+    }
+
+    // --- EVENT LISTENERS ---
+    document.addEventListener('DOMContentLoaded', initialize);
+    
+    document.body.addEventListener('input', () => saveStateToStorage());
+    
+    DOMElements.mediaUpload.addEventListener('change', handleMediaUpload);
+    DOMElements.headerBgUpload.addEventListener('change', (e) => handleGlobalMediaUpload(e, 'headerBgSrc'));
+    DOMElements.tickerBgUpload.addEventListener('change', (e) => handleGlobalMediaUpload(e, 'tickerBgSrc'));
+    DOMElements.transitionVideoUpload.addEventListener('change', (e) => handleGlobalMediaUpload(e, 'transitionVideoSrc'));
+
+    document.getElementById('saveSettingsBtn').addEventListener('click', () => saveStateToStorage(true));
+    document.getElementById('clearSettingsBtn').addEventListener('click', clearAndReset);
+
+    DOMElements.rundownListUI.addEventListener('click', (e) => {
+        const li = e.target.closest('li'); if (!li) return;
+        const setIndex = parseInt(li.dataset.setIndex);
+        if (e.target.classList.contains('go-live-btn')) {
+            liveState.set = setIndex;
+            renderRundownList();
+            saveStateToStorage();
+        } else {
+            loadSetIntoEditor(setIndex);
+        }
+    });
+    </script>
+</body>
+</html>

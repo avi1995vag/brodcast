@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Broadcast Screen</title>
+    <link href="https://fonts.googleapis.com/css2?family=Anek+Kannada:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #0078D4; --dark-bg-1: #1a2333;
+            --dark-bg-2: #111827; --border-color: #005a9e;
+            --text-color: #ffffff; --logo-text-color: #ffffff;
+            --layout-split: 30%;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; }
+        body { font-family: 'Anek Kannada', sans-serif; background: var(--dark-bg-2); color: var(--text-color); }
+
+        .news-container { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; position: relative; background: transparent; }
+        #particle-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; background: var(--dark-bg-2); }
+        #transitionVideo { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2000; object-fit: cover; display: none; pointer-events: none; }
+        .top-header, .bottom-ticker { background: var(--dark-bg-2); padding: 15px 40px; z-index: 10; position: relative; overflow: hidden; }
+        .top-header { border-bottom: 3px solid var(--primary-color); }
+        .bottom-ticker { border-top: 3px solid var(--primary-color); display: flex; justify-content: center; align-items: center; }
+        .header-content { display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 2; }
+        .header-left { display: flex; align-items: center; gap: 25px; flex-shrink: 1; min-width: 0; }
+        .text-reveal-wrapper { overflow: hidden; }
+        .animate-reveal { transform: translateY(0) !important; }
+        .news-logo, .news-subtitle, #tickerLine { transform: translateY(110%); transition: transform 0.5s cubic-bezier(0.2, 1, 0.3, 1); }
+        .news-logo { background: var(--primary-color); padding: 5px 20px; font-weight: 800; letter-spacing: 2px; border-radius: 8px; color: var(--logo-text-color); white-space: nowrap; }
+        .news-subtitle { font-weight: 700; text-transform: uppercase; letter-spacing: 2px; text-shadow: 1px 1px 3px rgba(0,0,0,0.5); white-space: nowrap; }
+        #tickerLine { font-weight: 700; letter-spacing: 1px; white-space: nowrap; }
+        .time-display { font-size: 16px; font-weight: 600; padding: 8px 15px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; flex-shrink: 0; }
+        .bar-background { position: absolute; top:0; left:0; width: 100%; height: 100%; object-fit: cover; z-index: 0; opacity: 0.3; }
+        .bar-background::after { content:''; position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.4); z-index:1; }
+        .main-content { overflow: hidden; position: relative; display: grid; grid-template-columns: var(--layout-split) 1fr; }
+        .anchor-placeholder { background: transparent; }
+        .main-media-section { background: #000; position: relative; z-index: 5; }
+        #mediaContainer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #mediaContainer img, #mediaContainer video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.8s ease-in-out; }
+        #mediaContainer .visible { opacity: 1; }
+    </style>
+</head>
+<body>
+    <div id="particle-canvas"></div>
+    <video id="transitionVideo"></video>
+
+    <div class="news-container" id="newsContainer">
+        <div class="top-header">
+            <video class="bar-background" id="headerBgVideo" muted loop autoplay playsinline></video>
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="text-reveal-wrapper"><div class="news-logo" id="headerTitle"></div></div>
+                    <div class="text-reveal-wrapper"><div class="news-subtitle" id="headerSubtitle"></div></div>
+                </div>
+                <div class="time-display"><span id="currentTime">00:00:00</span></div>
+            </div>
+        </div>
+        <div class="main-content">
+            <div class="anchor-placeholder"></div>
+            <div class="main-media-section"><div id="mediaContainer"></div></div>
+        </div>
+        <div class="bottom-ticker">
+            <video class="bar-background" id="tickerBgVideo" muted loop autoplay playsinline></video>
+            <div class="text-reveal-wrapper" style="position: relative; z-index: 2;"><div id="tickerLine"></div></div>
+        </div>
+    </div>
+
+    <script>
+    // --- STATE & GLOBAL VARS ---
+    let newsSets = [];
+    let liveState = { set: 0, slide: 0, timer: null, isTransitioning: false };
+    let globalSettings = { transitionVideoSrc: '', wipePoint: 0.5 };
+    let mediaToggleIndex = 0;
+
+    // --- DOM ELEMENT CACHE ---
+    const DOMElements = {
+        headerTitle: document.getElementById('headerTitle'), headerSubtitle: document.getElementById('headerSubtitle'),
+        tickerLine: document.getElementById('tickerLine'), mediaContainer: document.getElementById('mediaContainer'),
+        headerBgVideo: document.getElementById('headerBgVideo'), tickerBgVideo: document.getElementById('tickerBgVideo'),
+        transitionVideo: document.getElementById('transitionVideo')
+    };
+    
+    // --- INITIALIZATION ---
+    function initialize() {
+        createMediaElements();
+        loadStateFromStorage();
+        updateTime();
+        setInterval(updateTime, 1000);
+    }
+
+    function createMediaElements() {
+        DOMElements.mediaContainer.innerHTML = Array.from({ length: 2 }, () => `<img src=""><video src="" muted loop autoplay playsinline></video>`).join('');
+    }
+
+    // --- DISPLAY & AUTO-SIZING LOGIC ---
+    function adjustFontSize(element, container) {
+        let fontSize = 48; element.style.fontSize = fontSize + 'px';
+        while ((element.scrollWidth > container.clientWidth - 20) && fontSize > 10) {
+            fontSize--; element.style.fontSize = fontSize + 'px';
+        }
+    }
+
+    function updateText(element, newText, autoSize = false, container = null) {
+        if (element.textContent === newText) { if (!element.classList.contains('animate-reveal')) element.classList.add('animate-reveal'); return; }
+        element.classList.remove('animate-reveal');
+        setTimeout(() => { element.textContent = newText; if (autoSize) adjustFontSize(element, container); element.classList.add('animate-reveal'); }, 50);
+    }
+    
+    function updateDisplay(setIndex, slideIndex, isInitialLoad = false) {
+        const set = newsSets[setIndex];
+        if (!set || !set.slides[slideIndex]) return; // Safety check
+        const slide = set.slides[slideIndex];
+        
+        const updateActions = () => {
+            updateText(DOMElements.headerTitle, slide.headerTitle, true, DOMElements.headerTitle.parentElement.parentElement);
+            updateText(DOMElements.headerSubtitle, slide.headerSubtitle, true, DOMElements.headerSubtitle.parentElement.parentElement);
+            updateText(DOMElements.tickerLine, slide.tickerLine, true, DOMElements.tickerLine.parentElement.parentElement);
+        };
+        
+        if (isInitialLoad) {
+            updateActions();
+            setTimeout(() => { [DOMElements.headerTitle, DOMElements.headerSubtitle, DOMElements.tickerLine].forEach(el => el.classList.add('animate-reveal')); }, 50);
+        } else { updateActions(); }
+
+        mediaToggleIndex = 1 - mediaToggleIndex;
+        const isImage = slide.mediaSrc && slide.mediaSrc.startsWith('data:image');
+        const mediaElements = DOMElements.mediaContainer.querySelectorAll(isImage ? 'img' : 'video');
+        const targetElement = mediaElements[mediaToggleIndex];
+        
+        if (targetElement && targetElement.src !== slide.mediaSrc) targetElement.src = slide.mediaSrc;
+        if (!isImage && targetElement) targetElement.play().catch(e => {});
+        
+        Array.from(DOMElements.mediaContainer.children).forEach(el => el.classList.remove('visible'));
+        if (targetElement) targetElement.classList.add('visible');
+    }
+
+    // --- TRANSITION & AUTO-SLIDE LOGIC ---
+    function transitionToSet(setIndex) {
+        if (liveState.isTransitioning || (liveState.set === setIndex && liveState.timer)) return;
+        clearInterval(liveState.timer);
+        liveState.isTransitioning = true;
+        liveState.set = setIndex; 
+
+        const performContentSwap = () => {
+            liveState.slide = 0;
+            updateDisplay(liveState.set, liveState.slide, true);
+            startAutoSlide();
+        };
+
+        if (globalSettings.transitionVideoSrc) {
+            DOMElements.transitionVideo.src = globalSettings.transitionVideoSrc;
+            DOMElements.transitionVideo.style.display = 'block';
+            DOMElements.transitionVideo.play();
+            setTimeout(performContentSwap, globalSettings.wipePoint * 1000);
+        } else {
+            performContentSwap();
+            liveState.isTransitioning = false;
+        }
+    }
+    
+    function startAutoSlide() {
+        clearInterval(liveState.timer);
+        const duration = globalSettings.slideDuration * 1000;
+        if (!duration || duration < 1000) return;
+        liveState.timer = setInterval(() => {
+            liveState.slide = (liveState.slide + 1) % 5;
+            updateDisplay(liveState.set, liveState.slide);
+        }, duration);
+    }
+    
+    // --- STYLE, THEME & STATE LOGIC ---
+    const themes = {
+        blue: { '--primary-color': '#0078D4', '--dark-bg-1': '#1a2333', '--dark-bg-2': '#111827', '--border-color': '#005a9e', '--text-color': '#ffffff', '--logo-text-color': '#ffffff' },
+        red: { '--primary-color': '#c41e3a', '--dark-bg-1': '#1e1e1e', '--dark-bg-2': '#121212', '--border-color': '#ff1744', '--text-color': '#ffffff', '--logo-text-color': '#ffffff' },
+        tech: { '--primary-color': '#00f2ea', '--dark-bg-1': '#2d0f41', '--dark-bg-2': '#1a0925', '--border-color': '#8c1eff', '--text-color': '#ffffff', '--logo-text-color': '#1a0925' },
+        light: { '--primary-color': '#0078D4', '--dark-bg-1': '#e1e1e1', '--dark-bg-2': '#f5f5f5', '--border-color': '#005a9e', '--text-color': '#111827', '--logo-text-color': '#ffffff' }
+    };
+    function setTheme(themeName) { Object.entries(themes[themeName]).forEach(([k, v]) => document.documentElement.style.setProperty(k, v)); }
+    function applyGlobalStyles() { document.documentElement.style.setProperty('--layout-split', globalSettings.layoutSplit + '%'); }
+    function updateTime() { document.getElementById('currentTime').textContent = new Date().toLocaleTimeString('en-US', { hour12: false }); }
+
+    function loadStateFromStorage() {
+        try {
+            const data = JSON.parse(localStorage.getItem('broadcastData'));
+            if (!data) throw new Error("No saved data");
+
+            const oldLiveSet = liveState.set;
+
+            newsSets = data.newsSets || [];
+            globalSettings = data.globalSettings || {};
+            liveState.set = data.liveState ? data.liveState.set : 0;
+
+            setTheme(globalSettings.theme || 'blue');
+            applyGlobalStyles();
+            
+            DOMElements.headerBgVideo.src = globalSettings.headerBgSrc || '';
+            DOMElements.tickerBgVideo.src = globalSettings.tickerBgSrc || '';
+
+            if (oldLiveSet !== liveState.set && !liveState.isTransitioning) {
+                transitionToSet(liveState.set);
+            } else if (!liveState.timer) {
+                 updateDisplay(liveState.set, liveState.slide, true);
+                 startAutoSlide();
+            }
+        } catch(e) { console.error("Could not load state, using defaults.", e); }
+    }
+
+    // --- EVENT LISTENERS ---
+    document.addEventListener('DOMContentLoaded', initialize);
+    window.addEventListener('storage', (e) => { if (e.key === 'broadcastData') loadStateFromStorage(); });
+    DOMElements.transitionVideo.addEventListener('ended', () => { DOMElements.transitionVideo.style.display = 'none'; liveState.isTransitioning = false; });
+    
+    // --- PARTICLE BACKGROUND ---
+    const canvas = document.getElementById('particle-canvas'); const ctx = canvas.getContext('2d'); canvas.width = window.innerWidth; canvas.height = window.innerHeight; let pA; function initP(){pA=[];let n=(canvas.height*canvas.width)/9e3;for(let i=0;i<n;i++){let s=Math.random()*2+1,x=Math.random()*innerWidth,y=Math.random()*innerHeight,dX=Math.random()*.4-.2,dY=Math.random()*.4-.2;pA.push({x:x,y:y,dX:dX,dY:dY,s:s})}} function animP(){requestAnimationFrame(animP);ctx.clearRect(0,0,innerWidth,innerHeight);const pC=getComputedStyle(document.documentElement).getPropertyValue('--primary-color')+'40';for(let p of pA){if(p.x>canvas.width||p.x<0)p.dX=-p.dX;if(p.y>canvas.height||p.y<0)p.dY=-p.dY;p.x+=p.dX;p.y+=p.dY;ctx.beginPath();ctx.arc(p.x,p.y,p.s,0,Math.PI*2);ctx.fillStyle=pC;ctx.fill()}} window.addEventListener('resize',()=>{canvas.width=innerWidth;canvas.height=innerHeight;initP()});initP();animP();
+    </script>
+</body>
+</html>
