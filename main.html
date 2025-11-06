@@ -194,7 +194,7 @@
         if (!data) return;
         
         const oldLiveSet = liveState.set;
-        const needsFullRefresh = !newsSets.length;
+        const needsFullRefresh = !newsSets.length; // True only on first load
 
         newsSets = data.newsSets || [];
         globalSettings = data.globalSettings || {};
@@ -209,9 +209,10 @@
         if (needsFullRefresh) {
             updateDisplay(liveState.set, liveState.slide, true);
             startAutoSlide();
-        } else if (oldLiveSet !== liveState.set) {
+        } else if (oldLiveSet !== liveState.set && !liveState.isTransitioning) {
             transitionToSet(liveState.set);
-        } else {
+        } else if (!liveState.isTransitioning) {
+            // If only text/media changed in the current set, just update display
             updateDisplay(liveState.set, liveState.slide);
         }
     }
