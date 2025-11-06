@@ -70,7 +70,7 @@
     // --- STATE & GLOBAL VARS ---
     let newsSets = [];
     let liveState = { set: 0, slide: 0, timer: null, isTransitioning: false };
-    let globalSettings = { transitionVideoSrc: '', wipePoint: 0.5 };
+    let globalSettings = {};
     let mediaToggleIndex = 0;
     let lastDataSnapshot = '';
 
@@ -186,38 +186,34 @@
         const currentData = localStorage.getItem('broadcastData');
         if (currentData && currentData !== lastDataSnapshot) {
             lastDataSnapshot = currentData;
-            loadStateFromStorage();
+            loadStateFromStorage(JSON.parse(currentData));
         }
     }
     
-    function loadStateFromStorage() {
-        try {
-            const data = JSON.parse(lastDataSnapshot);
-            if (!data) return;
+    function loadStateFromStorage(data) {
+        if (!data) return;
+        
+        const oldLiveSet = liveState.set;
+        const needsFullRefresh = !newsSets.length;
 
-            const oldLiveSet = liveState.set;
-            const needsFullRefresh = !newsSets.length; // True only on first load
+        newsSets = data.newsSets || [];
+        globalSettings = data.globalSettings || {};
+        liveState.set = data.liveState ? data.liveState.set : 0;
 
-            newsSets = data.newsSets || [];
-            globalSettings = data.globalSettings || {};
-            liveState.set = data.liveState ? data.liveState.set : 0;
+        setTheme(globalSettings.theme || 'blue');
+        applyGlobalStyles();
+        
+        DOMElements.headerBgVideo.src = globalSettings.headerBgSrc || '';
+        DOMElements.tickerBgVideo.src = globalSettings.tickerBgSrc || '';
 
-            setTheme(globalSettings.theme || 'blue');
-            applyGlobalStyles();
-            
-            DOMElements.headerBgVideo.src = globalSettings.headerBgSrc || '';
-            DOMElements.tickerBgVideo.src = globalSettings.tickerBgSrc || '';
-
-            if (needsFullRefresh) {
-                updateDisplay(liveState.set, liveState.slide, true);
-                startAutoSlide();
-            } else if (oldLiveSet !== liveState.set && !liveState.isTransitioning) {
-                transitionToSet(liveState.set);
-            } else {
-                // If only text/media changed in the current set, just update display
-                updateDisplay(liveState.set, liveState.slide);
-            }
-        } catch(e) { /* Fail silently, will retry on next poll */ }
+        if (needsFullRefresh) {
+            updateDisplay(liveState.set, liveState.slide, true);
+            startAutoSlide();
+        } else if (oldLiveSet !== liveState.set) {
+            transitionToSet(liveState.set);
+        } else {
+            updateDisplay(liveState.set, liveState.slide);
+        }
     }
 
     // --- EVENT LISTENERS ---
